@@ -44,7 +44,7 @@ s_mem samples(.address(s_addr), .clock(CLOCK_50), .data(s_wrdata), .wren(s_wren)
 logic [2:0] state, nextstate;
 
 // the rest of your code goes here.  don't forget to instantiate the on-chip memory
-always_ff @(posedge CLOCK_50) begin
+always_ff @(posedge clk or negedge rst_n) begin
     if (~rst_n) begin
         state <= `start;
     end else begin
@@ -53,7 +53,7 @@ always_ff @(posedge CLOCK_50) begin
 end
 
 
-always_ff @(posedge CLOCK_50) begin
+always_ff @(posedge clk) begin
     case(state)
         `start: begin //initialize these variables
             flash_mem_address <= 0;
@@ -108,28 +108,23 @@ always_comb begin
                 s_wrdata = 0;
                 s_wren = 0;
                 s_addr = oc_addr;
+                HEX0 = 7'b0111111;
             end else begin
                 nextstate = `start;
                 flash_mem_read = 0;
                 s_wrdata = 0;
                 s_wren = 0;
                 s_addr = oc_addr;
+                HEX0 = 7'b0111111;
             end
         end
         `readram: begin
-            if (~flash_mem_waitrequest) begin //move on from start if wait request is 0
-                nextstate = `writeaddr1;
-                flash_mem_read = 1;
-                s_wrdata = 0;
-                s_wren = 0;
-                s_addr = oc_addr;
-            end else begin
-                nextstate = `readram;
-                flash_mem_read = 0;
-                s_wrdata = 0;
-                s_wren = 0;
-                s_addr = oc_addr;
-            end
+            nextstate = `writeaddr1;
+            flash_mem_read = 1;
+            s_wrdata = 0;
+            s_wren = 0;
+            s_addr = oc_addr;
+            HEX0 = 7'b0000110;
         end
         `writeaddr1: begin
             if (flash_mem_readdatavalid) begin
@@ -138,12 +133,14 @@ always_comb begin
                 s_wrdata = flash_mem_readdata[15:0]; //assign s_wrdata to readdata
                 s_wren = 1;
                 s_addr = oc_addr;
+                HEX0 = 7'b1011011;
             end else begin
                 nextstate = `writeaddr1;
                 flash_mem_read = 0;
                 s_wrdata = 0;
                 s_wren = 0;
                 s_addr = oc_addr;
+                HEX0 = 7'b1011011;
             end
         end
         `writeaddr2: begin
@@ -153,12 +150,14 @@ always_comb begin
                 s_wrdata = keeper[31:16]; //assign s_wrdata to stored data
                 s_wren = 1;
                 s_addr = oc_addr + 1;
+                HEX0 = 7'b1001111;
             end else begin
                 nextstate = `increment;
                 flash_mem_read = 0;
                 s_wrdata = keeper[31:16]; //assign s_wrdata to stored data
                 s_wren = 1;
                 s_addr = oc_addr + 1;
+                HEX0 = 7'b1001111;
             end
         end
         `increment: begin
@@ -167,6 +166,7 @@ always_comb begin
             s_wrdata = 0;
             s_wren = 0;
             s_addr = oc_addr;
+            HEX0 = 7'b1100110;
         end
         `done: begin
             nextstate = `done;
@@ -174,6 +174,7 @@ always_comb begin
             s_wrdata = 0;
             s_wren = 0;
             s_addr = oc_addr;
+            HEX0 = 7'b1101101;
         end
         default: begin
             nextstate = `start;
@@ -181,6 +182,7 @@ always_comb begin
             s_wrdata = 0;
             s_wren = 0;
             s_addr = oc_addr;
+            HEX0 = 7'bxxxxxxx;
         end
     endcase
 end
