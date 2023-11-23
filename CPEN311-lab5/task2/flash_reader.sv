@@ -34,12 +34,12 @@ flash flash_inst(.clk_clk(clk), .reset_reset_n(rst_n), .flash_mem_write(1'b0), .
 
                 //outputs are flash_mem_waitrequest, flash_mem_readdata, and flash_mem_readdatavalid
 
-logic [7:0] s_addr, oc_addr; //I searched for the double of 0x7FFFF
+logic [7:0] s_addr;
 logic [31:0] keeper;
 logic signed [15:0] s_wrdata, s_readdata;
 logic s_wren;
 
-s_mem samples(.address(s_addr), .clock(CLOCK_50), .data(s_wrdata), .wren(s_wren), .q(s_readdata));
+s_mem samples(.address(s_addr), .clock(clk), .data(s_wrdata), .wren(s_wren), .q(s_readdata));
 
 logic [2:0] state, nextstate;
 
@@ -53,48 +53,95 @@ always_ff @(posedge clk or negedge rst_n) begin
 end
 
 
+
 always_ff @(posedge clk) begin
     case(state)
         `start: begin //initialize these variables
-            flash_mem_address <= 0;
-            oc_addr <= 0; //oc_addr helps us track s_addr
-            keeper <= 0;
+            flash_mem_address <= 23'd0;  
+            keeper <= 32'd0;
+            flash_mem_read <= 0;
+            s_wrdata <= 0;
+            s_wren <= 0;
+            s_addr <= 8'd0;
+            HEX0 = 7'b0000000;
         end
         `readram: begin
-            flash_mem_address <= flash_mem_address;
-            oc_addr <= oc_addr;
-            keeper <= keeper;
+            if (~flash_mem_waitrequest) begin
+                flash_mem_address <= flash_mem_address;
+                keeper <= keeper;
+                flash_mem_read <= 1;
+                s_wrdata <= 0;
+                s_wren <= 0;
+                s_addr <= s_addr;
+
+            end else begin
+                flash_mem_address <= flash_mem_address;
+                keeper <= keeper;
+                flash_mem_read <= 1;
+                s_wrdata <= 0;
+                s_wren <= 0;
+                s_addr <= s_addr;
+  
+            end
         end
         `writeaddr1: begin
             if (flash_mem_readdatavalid) begin
                 flash_mem_address <= flash_mem_address;
-                oc_addr <= oc_addr;
                 keeper <= flash_mem_readdata; //if the read data is valid, store the data
+                flash_mem_read <= 1;
+                s_wrdata <= flash_mem_readdata[15:0]; //assign s_wrdata to readdata
+                s_wren <= 1; //WRITE ENABLE ON
+                s_addr <= s_addr;
+                if (flash_mem_readdata != 32'd0) begin
+                    HEX0 = 7'b1111001;
+                end
+
             end else begin
                 flash_mem_address <= flash_mem_address;
-                oc_addr <= oc_addr;
                 keeper <= keeper;
+                flash_mem_read <= 1;
+                s_wrdata <= 0;
+                s_wren <= 0;
+                s_addr <= s_addr;
+                
             end
         end
         `writeaddr2: begin
             flash_mem_address <= flash_mem_address;
-            oc_addr <= oc_addr;
+
             keeper <= keeper;
+            flash_mem_read <= 0;
+            s_wrdata <= keeper[31:16]; //assign s_wrdata to stored data
+            s_wren <= 1;
+            s_addr <= s_addr + 1;
+
         end
         `increment: begin
             flash_mem_address <= flash_mem_address + 1;
-            oc_addr <= oc_addr + 2;
             keeper <= keeper;
+            flash_mem_read <= 0;
+            s_wrdata <= 0;
+            s_wren <= 0;
+            s_addr <= s_addr + 1;
+     
         end
         `done: begin
             flash_mem_address <= flash_mem_address;
-            oc_addr <= oc_addr;
             keeper <= keeper;
+            flash_mem_read <= 0;
+            s_wrdata <= 0;
+            s_wren <= 0;
+            s_addr <= s_addr;
+ 
         end
         default: begin
             flash_mem_address <= flash_mem_address;
-            oc_addr <= oc_addr;
             keeper <= keeper;
+            flash_mem_read <= 0;
+            s_wrdata <= 0;
+            s_wren <= 0;
+            s_addr <= s_addr;
+    
         end
     endcase
 end
@@ -103,86 +150,48 @@ always_comb begin
     case(state)
         `start: begin
             if (~flash_mem_waitrequest) begin //move on from start if wait request is 0
-                nextstate = `readram;
-                flash_mem_read = 0;
-                s_wrdata = 0;
-                s_wren = 0;
-                s_addr = oc_addr;
-                HEX0 = 7'b0111111;
+                nextstate = `readram;         
             end else begin
                 nextstate = `start;
-                flash_mem_read = 0;
-                s_wrdata = 0;
-                s_wren = 0;
-                s_addr = oc_addr;
-                HEX0 = 7'b0111111;
             end
         end
         `readram: begin
-            nextstate = `writeaddr1;
-            flash_mem_read = 1;
-            s_wrdata = 0;
-            s_wren = 0;
-            s_addr = oc_addr;
-            HEX0 = 7'b0000110;
+            if (~flash_mem_waitrequest) begin 
+                nextstate = `writeaddr1;         
+            end else begin
+                nextstate = `readram;
+            end
+            
         end
         `writeaddr1: begin
             if (flash_mem_readdatavalid) begin
                 nextstate = `writeaddr2;
-                flash_mem_read = 0;
-                s_wrdata = flash_mem_readdata[15:0]; //assign s_wrdata to readdata
-                s_wren = 1;
-                s_addr = oc_addr;
-                HEX0 = 7'b1011011;
+                
             end else begin
                 nextstate = `writeaddr1;
-                flash_mem_read = 0;
-                s_wrdata = 0;
-                s_wren = 0;
-                s_addr = oc_addr;
-                HEX0 = 7'b1011011;
+                
             end
         end
         `writeaddr2: begin
             if (flash_mem_address == 'd127) begin //stop when half of 255
                 nextstate = `done;
-                flash_mem_read = 0;
-                s_wrdata = keeper[31:16]; //assign s_wrdata to stored data
-                s_wren = 1;
-                s_addr = oc_addr + 1;
-                HEX0 = 7'b1001111;
+                
             end else begin
                 nextstate = `increment;
-                flash_mem_read = 0;
-                s_wrdata = keeper[31:16]; //assign s_wrdata to stored data
-                s_wren = 1;
-                s_addr = oc_addr + 1;
-                HEX0 = 7'b1001111;
+
             end
         end
         `increment: begin
             nextstate = `readram;
-            flash_mem_read = 0;
-            s_wrdata = 0;
-            s_wren = 0;
-            s_addr = oc_addr;
-            HEX0 = 7'b1100110;
+            
         end
         `done: begin
             nextstate = `done;
-            flash_mem_read = 0;
-            s_wrdata = 0;
-            s_wren = 0;
-            s_addr = oc_addr;
-            HEX0 = 7'b1101101;
+           
         end
         default: begin
             nextstate = `start;
-            flash_mem_read = 0;
-            s_wrdata = 0;
-            s_wren = 0;
-            s_addr = oc_addr;
-            HEX0 = 7'bxxxxxxx;
+            
         end
     endcase
 end
