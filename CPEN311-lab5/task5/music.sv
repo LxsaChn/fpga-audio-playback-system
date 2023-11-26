@@ -46,7 +46,6 @@ flash flash_inst(.clk_clk(clk), .reset_reset_n(rst_n), .flash_mem_write(1'b0), .
 // your code for the rest of this task here
 logic [3:0] state; //states
 reg [31:0] sample;
-reg done;
 reg signed [15:0] sample1_input; //inputted sample into the left and right writedatas for the high sample (sample 1)
 reg signed [15:0] sample2_input; //inputted sample into the left and right writedatas for the high sample (sample 2)
 
@@ -63,7 +62,6 @@ always_ff @(posedge CLOCK_50) begin
         flash_mem_address <= 0;
         flash_mem_read <= 0;
         write_s <= 0;
-        done <= 0;
         state <= `wait_request;
     end else begin
         case(state)
@@ -139,7 +137,6 @@ always_ff @(posedge CLOCK_50) begin
                         flash_mem_address <= flash_mem_address + 1;
                     end else begin
                         flash_mem_address <= 0; //once it reads all addresses restart and begin loop again
-                        done <= 1;
                     end
                 end else begin
                     state <= `wait_ready_low2;
@@ -151,6 +148,4 @@ always_ff @(posedge CLOCK_50) begin
         endcase
     end
 end
-
-assign LEDR = {9'd0, done};
 endmodule: music
