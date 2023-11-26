@@ -1,14 +1,12 @@
 `timescale 1ps/1ps
-//need to change state bit size and number
-`define init 4'b000
-`define wait_request 4'b0001
-`define wait_ready_high1 4'b0010
+
+`define wait_request 4'b0000
+`define read_flash_mem 4'b0001
+`define store_samples 4'b0010
 `define write_sample1 4'b0011
 `define wait_ready_low1 4'b0100
-`define wait_ready_high2 4'b0010
-`define write_sample2 4'b0011
-`define wait_ready_low2 4'b0100
-
+`define write_sample2 4'b0101
+`define wait_ready_low2 4'b0110
 
 module music(input CLOCK_50, input CLOCK2_50, input [3:0] KEY, input [9:0] SW,
              input AUD_DACLRCK, input AUD_ADCLRCK, input AUD_BCLK, input AUD_ADCDAT,
@@ -46,9 +44,11 @@ flash flash_inst(.clk_clk(clk), .reset_reset_n(rst_n), .flash_mem_write(1'b0), .
                  .flash_mem_readdata(flash_mem_readdata), .flash_mem_readdatavalid(flash_mem_readdatavalid), .flash_mem_byteenable(flash_mem_byteenable), .flash_mem_writedata());
 
 // your code for the rest of this task here
-logic [3:0] state, nextstate; //states
+logic [3:0] state; //states
 reg [31:0] sample;
-reg signed [15:0] sample_input; //inputted sample into the left and right writedatas
+reg done;
+reg signed [15:0] sample1_input; //inputted sample into the left and right writedatas for the high sample (sample 1)
+reg signed [15:0] sample2_input; //inputted sample into the left and right writedatas for the high sample (sample 2)
 
 //assigning variables
 assign flash_mem_byteenable = 4'b1111; //The lab specified to set all bits to 1
@@ -59,89 +59,97 @@ assign clk = CLOCK_50;
 
 always_ff @(posedge CLOCK_50) begin
     if (~rst_n) begin //synchronous reset
-        state <= `init;
+        flash_mem_address <= 23'd0;
+        flash_mem_read <= 0;
+        write_s <= 0;
+        done <= 0;
+        state <= `wait_request;
     end else begin
-        state <= nextstate;
+        case(state)
+            `wait_request: begin
+                if (flash_mem_waitrequest == 0) begin
+                    flash_mem_address <= flash_mem_address;
+                    flash_mem_read <= 0;
+                    write_s <= 0;
+                    state <= `read_flash_mem;
+                end else begin
+                    flash_mem_address <= flash_mem_address;
+                    flash_mem_read <= 0;
+                    write_s <= 0;
+                    state <= `wait_request;
+                end
+            end
+            `read_flash_mem: begin
+                flash_mem_read <= 1;
+                write_s <= 0;
+                state <= `store_samples;
+            end
+            `store_samples: begin
+                if (flash_mem_readdatavalid == 1) begin
+                    state <= `write_sample1;
+                    write_s <= 0;
+                    sample1_input <= signed'(flash_mem_readdata[15:0])/signed'(64);
+                    sample2_input <= signed'(flash_mem_readdata[31:16])/signed'(64);
+                end else begin
+                    state <= `store_samples;
+                    write_s <= 0;
+                    sample1_input <= 0;
+                    sample2_input <= 0;
+                end
+            end
+            `write_sample1: begin
+                if (write_ready == 1) begin
+                    write_s <= 1;
+                    writedata_left <= sample1_input;
+                    writedata_right <= sample1_input;
+                    state <= `wait_ready_low1;
+                end else begin
+                    write_s <= 0;
+                    writedata_left <= 0;
+                    writedata_right <= 0;
+                    state <= `write_sample1;
+                end
+            end
+            `wait_ready_low1: begin
+                if (write_ready == 0) begin
+                    state <= `write_sample2;
+                end else begin
+                    state <= `wait_ready_low1;
+                end
+            end
+            `write_sample2: begin
+                if (write_ready == 1) begin
+                    write_s <= 1;
+                    writedata_left <= sample2_input;
+                    writedata_right <= sample2_input;
+                    state <= `wait_ready_low2;
+                end else begin
+                    write_s <= 0;
+                    writedata_left <= 0;
+                    writedata_right <= 0;
+                    state <= `write_sample2;
+                end
+            end
+            `wait_ready_low2: begin
+                 if (write_ready == 0) begin
+                    state <= `wait_request;
+                    flash_mem_read <= 0;
+                    if (flash_mem_address < 1048576) begin
+                        flash_mem_address <= flash_mem_address + 1;
+                    end else begin
+                        flash_mem_address <= 0;
+                        done <= 1;
+                    end
+                end else begin
+                    state <= `wait_ready_low2;
+                end
+            end
+            default: begin
+                state <= 4'bxxxx;
+            end
+        endcase
     end
 end
 
-always_ff @(posedge CLOCK_50) begin
-    case(state)
-        `init: begin //initialize regs
-            write_s <= 0;
-            flash_mem_read <= 1; //ready to read
-            flash_mem_address <= 0;
-            nextstate <= `wait_request;
-        end
-        `wait_request: begin //waits for wait request to be set to 1'b0 (flash is ready for read request)
-            flash_mem_read <= 1; //ready to read
-            write_s <= 0; //not writing
-            if (!flash_mem_waitrequest && flash_mem_readdatavalid) begin //if waitrequest 1'b0 and datavalid = 1'b1 (flash is ready for read request and data is valid), ask lisa how readdata_valid works
-                nextstate <= `wait_ready_high1;
-            end else begin
-                nextstate <= `wait_request; //else stay in the same state
-            end
-        end
-        `wait_ready_high1: begin
-            sample <= flash_mem_readdata; //sample gets readdata
-            if (write_ready) begin //if ready to write go to write_sample state
-                nextstate <= `write_sample1;
-                flash_mem_read <= 0; //no longer ready to read
-            end else begin //else stay in the state
-                nextstate <= `wait_ready_high1;
-                flash_mem_read <= 1; //still ready to read
-            end
-        end
-        `write_sample1: begin  //making 0 = the first 16 bits and 1 = the last 16 bits of the 32 bit sample
-            sample_input = sample[15:0]/signed'(16'd64); //samples divided by 64 before sending to CODEC to so it's not loud
-            writedata_left <= sample_input;
-            writedata_right <= sample_input;
-            write_s <= 1; //write to CODEC
-            nextstate <= `wait_ready_low1;
-        end
-        `wait_ready_low1: begin
-            if (!write_ready) begin //wait until ready is low, we are waiting for the write to go through
-                nextstate <= `wait_ready_high2;
-            end else begin
-                nextstate <= `wait_ready_low1; //stay in state until wait_ready = 0
-            end
-        end
-        `wait_ready_high2: begin
-            //sample should already have readdata stored
-            if (write_ready) begin //if ready to write go to write_sample state
-                nextstate <= `write_sample2;
-            end else begin //else stay in the state
-                nextstate <= `wait_ready_high2;
-            end
-        end
-        `write_sample2: begin  //making 0 = the first 16 bits and 1 = the last 16 bits of the 32 bit sample
-            sample_input = sample[31:16]/signed'(16'd64); //samples divided by 64 before sending to CODEC to so it's not loud
-            writedata_left <= sample_input;
-            writedata_right <= sample_input;
-            write_s <= 1; //write to CODEC
-            nextstate <= `wait_ready_low2;
-        end
-        `wait_ready_low2: begin
-            if (!write_ready) begin //wait until ready is low, we are waiting for the write to go through
-                if (flash_mem_address < 1) begin //keeps looping until condition is met
-                    flash_mem_address <= flash_mem_address + 1;
-                    sample_input <= 0; //clearing out sample_input
-                    sample <= 0; //clearing out sample
-                    nextstate <= `wait_request;
-                end else begin //have reached the end of address so cannot increment further so reset values and restart
-                    flash_mem_address <= 0; //go back to start
-                    sample_input <= 0; //clearing out sample_input
-                    sample <= 0; //clearing out sample
-                    nextstate <= `wait_request;
-                end
-            end else begin
-                nextstate <= `wait_ready_low2; //stay in state until wait_ready = 0
-            end
-        end
-        default: begin
-            nextstate <= `init; //should never go back into init unless it has been reset
-        end
-    endcase
-end
-
+assign LEDR = {9'd0, done};
 endmodule: music
