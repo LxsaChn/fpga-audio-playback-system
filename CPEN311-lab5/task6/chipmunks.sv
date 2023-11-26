@@ -1,3 +1,18 @@
+`timescale 1ps/1ps
+
+//state machine states
+`define wait_request 4'b0000
+`define read_flash_mem 4'b0001
+`define store_samples 4'b0010
+`define write_sample1 4'b0011
+`define wait_ready_low1 4'b0100
+`define write_sample2 4'b0101
+`define wait_ready_low2 4'b0110
+
+//switch states that will define playback speed
+`define chipmunk 2'b01
+`define laidback 2'b10
+
 module chipmunks(input CLOCK_50, input CLOCK2_50, input [3:0] KEY, input [9:0] SW,
                  input AUD_DACLRCK, input AUD_ADCLRCK, input AUD_BCLK, input AUD_ADCDAT,
                  inout FPGA_I2C_SDAT, output FPGA_I2C_SCLK, output AUD_DACDAT, output AUD_XCK,
@@ -34,5 +49,126 @@ flash flash_inst(.clk_clk(clk), .reset_reset_n(rst_n), .flash_mem_write(1'b0), .
                  .flash_mem_readdata(flash_mem_readdata), .flash_mem_readdatavalid(flash_mem_readdatavalid), .flash_mem_byteenable(flash_mem_byteenable), .flash_mem_writedata());
 
 // your code for the rest of this task here
+logic [3:0] state; //states
+reg [31:0] sample;
+reg signed [15:0] sample1_input; //inputted sample into the left and right writedatas for the high sample (sample 1)
+reg signed [15:0] sample2_input; //inputted sample into the left and right writedatas for the high sample (sample 2)
+reg [1:0] speed; //one hot code to define playback
 
+//assigning variables
+assign flash_mem_byteenable = 4'b1111; //The lab specified to set all bits to 1
+assign reset = ~(KEY[3]); //reset button is KEY[3] active-low from sound.sv "The audio core requires an active high reset signal"
+assign read_s = 1'b0; //The lab specified to keep this bit off
+assign rst_n = KEY[3];
+assign clk = CLOCK_50;
+
+//keep track of the playback mode
+assign mode = SW[1:0];
+
+always_comb begin
+    case(mode)
+        `chipmunk: begin //play 1 1 1 or 2 2 2
+            speed = 2'b10;
+        end
+        `laidback:begin //play each sample twice
+            speed = 2'b01;
+        end
+        default: begin //this will be normal mode
+            speed = 2'b00;
+        end
+    endcase
+end
+
+always_ff @(posedge CLOCK_50) begin
+    if (~rst_n) begin //synchronous reset
+        //initialize regs
+        flash_mem_address <= 0;
+        flash_mem_read <= 0;
+        write_s <= 0;
+        state <= `wait_request;
+    end else begin
+        case(state)
+            `wait_request: begin
+                if (!flash_mem_waitrequest) begin //waits for wait request to be set to 1'b0 
+                    flash_mem_address <= flash_mem_address;
+                    flash_mem_read <= 0;
+                    write_s <= 0;
+                    state <= `read_flash_mem;
+                end else begin
+                    flash_mem_address <= flash_mem_address;
+                    flash_mem_read <= 0;
+                    write_s <= 0;
+                    state <= `wait_request;
+                end
+            end
+            `read_flash_mem: begin
+                flash_mem_read <= 1; //ready to read flash_mem
+                state <= `store_samples;
+            end
+            `store_samples: begin
+                if (flash_mem_readdatavalid) begin //if data read is valid
+                    state <= `write_sample1;
+                    flash_mem_read = 0; //no longer reading flash_mem
+                    //dividing sample inputs by 64 before sending to CODEC to so it's not loud
+                    sample1_input <= signed'(flash_mem_readdata[15:0])/signed'(64);
+                    sample2_input <= signed'(flash_mem_readdata[31:16])/signed'(64);
+                end else begin
+                    state <= `store_samples;
+                    flash_mem_read = 1;
+                    sample1_input <= 0;
+                    sample2_input <= 0;
+                end
+            end
+            `write_sample1: begin
+                if (write_ready) begin //once write_ready is enabled
+                    write_s <= 1; //write sample data to CODEC
+                    writedata_left <= sample1_input;
+                    writedata_right <= sample1_input;
+                    state <= `wait_ready_low1;
+                end else begin
+                    write_s <= 0;
+                    writedata_left <= 0;
+                    writedata_right <= 0;
+                    state <= `write_sample1;
+                end
+            end
+            `wait_ready_low1: begin
+                if (!write_ready) begin //wait for write_ready to go low
+                    state <= `write_sample2;
+                end else begin
+                    state <= `wait_ready_low1;
+                end
+            end
+            `write_sample2: begin
+                if (write_ready) begin
+                    write_s <= 1; //write sample data to CODEC
+                    writedata_left <= sample2_input;
+                    writedata_right <= sample2_input;
+                    state <= `wait_ready_low2;
+                end else begin
+                    write_s <= 0;
+                    writedata_left <= 0;
+                    writedata_right <= 0;
+                    state <= `write_sample2;
+                end
+            end
+            `wait_ready_low2: begin //wait for write_ready to go low
+                 if (!write_ready) begin
+                    state <= `wait_request;
+                    flash_mem_read <= 0;
+                    if (flash_mem_address < 1048576) begin ////keeps looping until all addresses have been read, there are 2097152 samples so 2097152 / 2 addresses
+                        flash_mem_address <= flash_mem_address + 1;
+                    end else begin
+                        flash_mem_address <= 0; //once it reads all addresses restart and begin loop again
+                    end
+                end else begin
+                    state <= `wait_ready_low2;
+                end
+            end
+            default: begin
+                state <= 4'bxxxx; //default case, should never happen
+            end
+        endcase
+    end
+end
 endmodule: chipmunks
