@@ -59,7 +59,8 @@ assign clk = CLOCK_50;
 
 always_ff @(posedge CLOCK_50) begin
     if (~rst_n) begin //synchronous reset
-        flash_mem_address <= 23'd0;
+        //initialize regs
+        flash_mem_address <= 0;
         flash_mem_read <= 0;
         write_s <= 0;
         done <= 0;
@@ -67,7 +68,7 @@ always_ff @(posedge CLOCK_50) begin
     end else begin
         case(state)
             `wait_request: begin
-                if (flash_mem_waitrequest == 0) begin
+                if (!flash_mem_waitrequest) begin //waits for wait request to be set to 1'b0 
                     flash_mem_address <= flash_mem_address;
                     flash_mem_read <= 0;
                     write_s <= 0;
@@ -80,26 +81,26 @@ always_ff @(posedge CLOCK_50) begin
                 end
             end
             `read_flash_mem: begin
-                flash_mem_read <= 1;
-                write_s <= 0;
+                flash_mem_read <= 1; //ready to read flash_mem
                 state <= `store_samples;
             end
             `store_samples: begin
-                if (flash_mem_readdatavalid == 1) begin
+                if (flash_mem_readdatavalid) begin //if data read is valid
                     state <= `write_sample1;
-                    write_s <= 0;
+                    flash_mem_read = 0; //no longer reading flash_mem
+                    //dividing sample inputs by 64 before sending to CODEC to so it's not loud
                     sample1_input <= signed'(flash_mem_readdata[15:0])/signed'(64);
                     sample2_input <= signed'(flash_mem_readdata[31:16])/signed'(64);
                 end else begin
                     state <= `store_samples;
-                    write_s <= 0;
+                    flash_mem_read = 1;
                     sample1_input <= 0;
                     sample2_input <= 0;
                 end
             end
             `write_sample1: begin
-                if (write_ready == 1) begin
-                    write_s <= 1;
+                if (write_ready) begin //once write_ready is enabled
+                    write_s <= 1; //write sample data to CODEC
                     writedata_left <= sample1_input;
                     writedata_right <= sample1_input;
                     state <= `wait_ready_low1;
@@ -111,15 +112,15 @@ always_ff @(posedge CLOCK_50) begin
                 end
             end
             `wait_ready_low1: begin
-                if (write_ready == 0) begin
+                if (!write_ready) begin //wait for write_ready to go low
                     state <= `write_sample2;
                 end else begin
                     state <= `wait_ready_low1;
                 end
             end
             `write_sample2: begin
-                if (write_ready == 1) begin
-                    write_s <= 1;
+                if (write_ready) begin
+                    write_s <= 1; //write sample data to CODEC
                     writedata_left <= sample2_input;
                     writedata_right <= sample2_input;
                     state <= `wait_ready_low2;
@@ -130,14 +131,14 @@ always_ff @(posedge CLOCK_50) begin
                     state <= `write_sample2;
                 end
             end
-            `wait_ready_low2: begin
-                 if (write_ready == 0) begin
+            `wait_ready_low2: begin //wait for write_ready to go low
+                 if (!write_ready) begin
                     state <= `wait_request;
                     flash_mem_read <= 0;
-                    if (flash_mem_address < 1048576) begin
+                    if (flash_mem_address < 1048576) begin ////keeps looping until all addresses have been read, there are 2097152 samples so 2097152 / 2 addresses
                         flash_mem_address <= flash_mem_address + 1;
                     end else begin
-                        flash_mem_address <= 0;
+                        flash_mem_address <= 0; //once it reads all addresses restart and begin loop again
                         done <= 1;
                     end
                 end else begin
@@ -145,7 +146,7 @@ always_ff @(posedge CLOCK_50) begin
                 end
             end
             default: begin
-                state <= 4'bxxxx;
+                state <= 4'bxxxx; //default case, should never happen
             end
         endcase
     end
