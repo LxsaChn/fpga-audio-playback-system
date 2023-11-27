@@ -122,7 +122,7 @@ always_ff @(posedge CLOCK_50) begin
                     if (mode == `chipmunk) begin
                         state <= `wait_ready_low2;
                         slow_counter <= 2'b00;
-                    end else if (mode == `laidback) begin
+                    end else if (mode == `laidback) begin //increment slow counter in slow state
                         state <= `wait_ready_low1;
                         slow_counter <= slow_counter + 1;
                     end else begin
@@ -145,9 +145,9 @@ always_ff @(posedge CLOCK_50) begin
                     //******************************************************************************
                     if (mode == `chipmunk) begin
                         state <= `wait_ready_low2;
-                    end else if (mode == `laidback && slow_counter != 2'd3) begin
+                        slow_counter <= 2'b00;
+                    end else if (mode == `laidback && slow_counter == 2'b01) begin
                         state <= `write_sample1;
-                        slow_counter <= slow_counter + 1;
                     end else begin
                         state <= `write_sample2;
                         slow_counter <= 2'b00;
@@ -180,9 +180,8 @@ always_ff @(posedge CLOCK_50) begin
             `wait_ready_low2: begin //wait for write_ready to go low
                  if (!write_ready) begin
                     //******************************************************************************
-                    if (mode == `laidback && slow_counter != 3) begin
+                    if (mode == `laidback && slow_counter == 2'b01) begin
                         state <= `write_sample2;
-                        slow_counter <= slow_counter + 1;
                     end else begin
                         state <= `wait_request;
                         slow_counter <= 2'b00;
