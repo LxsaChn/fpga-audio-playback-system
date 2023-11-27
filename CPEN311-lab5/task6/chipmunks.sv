@@ -185,18 +185,20 @@ always_ff @(posedge CLOCK_50) begin
                     end else begin
                         state <= `wait_request;
                         slow_counter <= 2'b00;
+                        flash_mem_read <= 0;
+                        if (flash_mem_address < 1048576) begin ////keeps looping until all addresses have been read, there are 2097152 samples so 2097152 / 2 addresses
+                            flash_mem_address <= flash_mem_address + 1;
+                        end else begin
+                            flash_mem_address <= 0; //once it reads all addresses restart and begin loop again
+                        end
                     end
                     //******************************************************************************
-                    flash_mem_read <= 0;
-                    if (flash_mem_address < 1048576) begin ////keeps looping until all addresses have been read, there are 2097152 samples so 2097152 / 2 addresses
-                        flash_mem_address <= flash_mem_address + 1;
-                    end else begin
-                        flash_mem_address <= 0; //once it reads all addresses restart and begin loop again
-                    end
+                    
                 end else begin
                     state <= `wait_ready_low2;
                 end
             end
+
             default: begin
                 state <= 4'bxxxx; //default case, should never happen
             end
