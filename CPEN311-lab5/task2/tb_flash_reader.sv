@@ -84,7 +84,7 @@ always_comb begin
         `ready_request: begin
             if (flash_mem_read == 1) begin
                 nextstate = `wait;
-                flash_mem_waitrequest = 0;
+                flash_mem_waitrequest = 1;
                 flash_mem_readdatavalid = 0;
             end else begin
                 nextstate = `ready_request;
@@ -93,9 +93,17 @@ always_comb begin
             end
         end
         `wait: begin
-            nextstate = `out_ok;
-            flash_mem_waitrequest = 1;
-            flash_mem_readdatavalid = 0;
+            //*************************************************************
+            if (flash_mem_read == 1) begin
+                nextstate = `out_ok;
+                flash_mem_waitrequest = 1;
+                flash_mem_readdatavalid = 0;
+            end else begin
+                nextstate = `ready_request;
+                flash_mem_waitrequest = 1;
+                flash_mem_readdatavalid = 0;
+            end
+            //****************************************************************
         end
         `out_ok: begin
             nextstate = `ready_request;
