@@ -121,13 +121,13 @@ always_ff @(posedge CLOCK_50) begin
                     //******************************************************************************
                     if (mode == `chipmunk) begin
                         state <= `wait_ready_low2;
-                        slow_counter <= 2'b00;
+                        slow_counter <= slow_counter + 1;
                     end else if (mode == `laidback) begin //increment slow counter in slow state
                         state <= `wait_ready_low1;
                         slow_counter <= slow_counter + 1;
                     end else begin
                         state <= `wait_ready_low1;
-                        slow_counter <= 2'b00;
+                        slow_counter <= slow_counter + 1;
                     end
                     //******************************************************************************
                     write_s <= 1; //write sample data to CODEC
@@ -163,7 +163,7 @@ always_ff @(posedge CLOCK_50) begin
                     if (mode == `laidback) begin
                         slow_counter <= slow_counter + 1;
                     end else begin
-                        slow_counter <= 2'b00;
+                        slow_counter <= slow_counter + 1;
                     end
                     //******************************************************************************
                     write_s <= 1; //write sample data to CODEC
