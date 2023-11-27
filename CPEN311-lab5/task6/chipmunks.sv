@@ -54,6 +54,7 @@ reg [31:0] sample;
 reg signed [15:0] sample1_input; //inputted sample into the left and right writedatas for the high sample (sample 1)
 reg signed [15:0] sample2_input; //inputted sample into the left and right writedatas for the high sample (sample 2)
 reg [1:0] speed; //one hot code to define playback
+reg [1:0] mode; //just instantiating mode
 
 //assigning variables
 assign flash_mem_byteenable = 4'b1111; //The lab specified to set all bits to 1
@@ -64,20 +65,6 @@ assign clk = CLOCK_50;
 
 //keep track of the playback mode
 assign mode = SW[1:0];
-
-always_comb begin
-    case(mode)
-        `chipmunk: begin //play 1 1 1 or 2 2 2
-            speed = 2'b10;
-        end
-        `laidback:begin //play each sample twice
-            speed = 2'b01;
-        end
-        default: begin //this will be normal mode
-            speed = 2'b00;
-        end
-    endcase
-end
 
 logic [1:0] slow_counter;
 always_ff @(posedge CLOCK_50) begin

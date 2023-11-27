@@ -152,5 +152,5 @@ always_ff @(posedge CLOCK_50) begin
     end
 end
 
-assign LEDR = {9'd0, done};
+assign LEDR = {9'd0, done}; //this is just a visual test for us to see if its done looping once sor not
 endmodule: music
