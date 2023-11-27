@@ -79,6 +79,7 @@ always_comb begin
     endcase
 end
 
+logic [1:0] slow_counter;
 always_ff @(posedge CLOCK_50) begin
     if (~rst_n) begin //synchronous reset
         //initialize regs
@@ -86,6 +87,7 @@ always_ff @(posedge CLOCK_50) begin
         flash_mem_read <= 0;
         write_s <= 0;
         state <= `wait_request;
+        slow_counter <= 0;
     end else begin
         case(state)
             `wait_request: begin
@@ -94,11 +96,13 @@ always_ff @(posedge CLOCK_50) begin
                     flash_mem_read <= 0;
                     write_s <= 0;
                     state <= `read_flash_mem;
+                    slow_counter <= 0;
                 end else begin
                     flash_mem_address <= flash_mem_address;
                     flash_mem_read <= 0;
                     write_s <= 0;
                     state <= `wait_request;
+                    slow_counter <= 0;
                 end
             end
             `read_flash_mem: begin
@@ -107,7 +111,13 @@ always_ff @(posedge CLOCK_50) begin
             end
             `store_samples: begin
                 if (flash_mem_readdatavalid) begin //if data read is valid
-                    state <= `write_sample1;
+                    //******************************************************************************
+                    if (mode == `chipmunk) begin
+                        state <= `write_sample2;
+                    end else begin
+                        state <= `write_sample1;
+                    end
+                    //******************************************************************************
                     flash_mem_read = 0; //no longer reading flash_mem
                     //dividing sample inputs by 64 before sending to CODEC to so it's not loud
                     sample1_input <= signed'(flash_mem_readdata[15:0])/signed'(64);
@@ -121,10 +131,21 @@ always_ff @(posedge CLOCK_50) begin
             end
             `write_sample1: begin
                 if (write_ready) begin //once write_ready is enabled
+                    //******************************************************************************
+                    if (mode == `chipmunk) begin
+                        state <= `wait_ready_low2;
+                        slow_counter <= 2'b00;
+                    end else if (mode == `laidback) begin
+                        state <= `wait_ready_low1;
+                        slow_counter <= slow_counter + 1;
+                    end else begin
+                        state <= `wait_ready_low1;
+                        slow_counter <= 2'b00;
+                    end
+                    //******************************************************************************
                     write_s <= 1; //write sample data to CODEC
                     writedata_left <= sample1_input;
                     writedata_right <= sample1_input;
-                    state <= `wait_ready_low1;
                 end else begin
                     write_s <= 0;
                     writedata_left <= 0;
@@ -134,13 +155,30 @@ always_ff @(posedge CLOCK_50) begin
             end
             `wait_ready_low1: begin
                 if (!write_ready) begin //wait for write_ready to go low
-                    state <= `write_sample2;
+                    //******************************************************************************
+                    if (mode == `chipmunk) begin
+                        state <= `wait_ready_low2;
+                    end else if (mode == `laidback && slow_counter != 2'd3) begin
+                        state <= `write_sample1;
+                        slow_counter <= slow_counter + 1;
+                    end else begin
+                        state <= `write_sample2;
+                        slow_counter <= 2'b00;
+                    end
+                    //******************************************************************************
                 end else begin
                     state <= `wait_ready_low1;
                 end
             end
             `write_sample2: begin
                 if (write_ready) begin
+                    //******************************************************************************
+                    if (mode == `laidback) begin
+                        slow_counter <= slow_counter + 1;
+                    end else begin
+                        slow_counter <= 2'b00;
+                    end
+                    //******************************************************************************
                     write_s <= 1; //write sample data to CODEC
                     writedata_left <= sample2_input;
                     writedata_right <= sample2_input;
@@ -154,7 +192,15 @@ always_ff @(posedge CLOCK_50) begin
             end
             `wait_ready_low2: begin //wait for write_ready to go low
                  if (!write_ready) begin
-                    state <= `wait_request;
+                    //******************************************************************************
+                    if (mode == `laidback && slow_counter != 3) begin
+                        state <= `write_sample2;
+                        slow_counter <= slow_counter + 1;
+                    end else begin
+                        state <= `wait_request;
+                        slow_counter <= 2'b00;
+                    end
+                    //******************************************************************************
                     flash_mem_read <= 0;
                     if (flash_mem_address < 1048576) begin ////keeps looping until all addresses have been read, there are 2097152 samples so 2097152 / 2 addresses
                         flash_mem_address <= flash_mem_address + 1;
